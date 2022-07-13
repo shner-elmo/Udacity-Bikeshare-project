@@ -2,6 +2,7 @@ import pandas as pd
 from pprint import pprint
 
 import datetime
+import time
 from functools import lru_cache
 from itertools import islice
 
@@ -42,11 +43,11 @@ class BikeShareData:
         """
         file_path = self.dir_path + file_name
         df = pd.read_csv(file_path)
-
         df['Start Time'] = pd.to_datetime(df['Start Time'], format='%Y-%m-%d %H:%M:%S')
-        df['Start hour'] = df['Start Time'].dt.hour
-        df['month'] = df['Start Time'].dt.month_name()
-        df['day_of_week'] = df['Start Time'].dt.day_name()
+        df['Start Hour'] = df['Start Time'].dt.hour
+        df['Month'] = df['Start Time'].dt.month_name()
+        df['Weekday'] = df['Start Time'].dt.day_name()
+        df['Trip'] = df['Start Station'] + ' -> ' + df['End Station']
         df = df.rename(columns={'Unnamed: 0': 'index'})
         return df
 
@@ -54,31 +55,40 @@ class BikeShareData:
         """
         print statistics about the dataset
         """
-        print('- Stats for nerds:')
-        day_group = self.df.groupby('day_of_week')
+        print('- Stats for nerds: \n')
+        day_group = self.df.groupby('Weekday')
+
+        date_col = self.df['Start Time']
+        print(f'Dataset first and last dates: {date_col.min().date()} - {date_col.max().date()}')
+        print_cyan('- ' * 25)
+
+        print(f'User types:', self.df["User Type"].value_counts().to_dict())
+        print_cyan('- ' * 25)
 
         if 'Gender' in self.df.columns:  # column present in only two of three datasets
             print('Users by gender:', self.df['Gender'].value_counts().to_dict())
             print_cyan('- ' * 25)
 
         if 'Birth Year' in self.df.columns:
-            self.df['age'] = datetime.datetime.now().year - self.df['Birth Year']
-            x = {'Average': self.df['age'].mean(), 'Median': self.df['age'].median()}
-            print(f"Average/ Median user's age: {x}")
+            print("User's age:")
+            age_col = datetime.datetime.now().year - self.df['Birth Year']
+            age_stats = age_col.agg(['mean', 'median', 'min', 'max'])
+            age_stats = {key: round(val) for key, val in age_stats.items()}
+            sorted_dict = dict(sorted(age_stats.items(), key=lambda x: x[1]))
+            pprint(sorted_dict, sort_dicts=False)
             print_cyan('- ' * 25)
 
-        print(f'User types:', self.df["User Type"].value_counts().to_dict())
-        print_cyan('- ' * 25)
-
-        print(f'Average trip duration by day:')
-        pprint(day_group['Trip Duration'].mean().to_dict())
+        print('Most common week-day:', self.df['Weekday'].mode()[0])
         print_cyan('- ' * 25)
 
         print('Most common Start hour by day:')
-        for day in day_group.groups:
-            group = day_group.get_group(day)
-            value = group['Start hour'].value_counts().idxmax()
-            print(f'{day:<10} {value}')
+        pprint(day_group['Start Hour'].agg(pd.Series.mode).to_dict())
+        print_cyan('- ' * 25)
+
+        print(f'Average trip duration by day:')
+        day_avg_time = day_group['Trip Duration'].mean().to_dict()
+        x = {key: time.strftime("%H:%M:%S", time.gmtime(val)) for key, val in day_avg_time.items()}
+        pprint(x)
         print_cyan('- ' * 25)
 
         start = self.df['Start Station'].value_counts()
@@ -87,8 +97,10 @@ class BikeShareData:
         for key, val in end.items():
             data.setdefault(key, 0)
             data[key] += val
-        print('Most common used station:', max(data, key=data.get))
+        print(f'Most used station:', max(data, key=data.get))
+        print_cyan('- ' * 25)
 
+        print(f'Most common station combination: {self.df["Trip"].mode()[0]}')
         print_cyan('-' * 100)
 
     def filter_data_by_month(self):
@@ -97,42 +109,40 @@ class BikeShareData:
         """
         print('- Filters:')
 
-        month_options = list(self.df["month"].unique())
-        prompt = 'For which Month would you like to view data: \n'\
+        month_options = list(self.df["Month"].unique())
+        prompt = 'For which Month would you like to view data: \n' \
                  f'Options: {month_options}, or press ENTER to view all: '
         input_month = get_input(prompt=prompt, options=month_options + [''])
 
         if input_month != '':
-            filt = self.df['month'] == input_month.title()
+            filt = self.df['Month'] == input_month.title()
             self.df = self.df[filt]
 
     def filter_data_by_dow(self):
         """
         Filter DataFrame by week-day
         """
-        day_options = list(self.df["day_of_week"].unique())
-        prompt = '\nFor which Week-day would you like to view data: \n'\
+        day_options = list(self.df['Weekday'].unique())
+        prompt = '\nFor which Week-day would you like to view data: \n' \
                  f'Options: {day_options}, or press ENTER to view all: '
         input_day = get_input(prompt=prompt, options=day_options + [''])
 
         if input_day != '':
-            filt = self.df['day_of_week'] == input_day.title()
+            filt = self.df['Weekday'] == input_day.title()
             self.df = self.df[filt]
 
         print_cyan('-' * 100)
 
     def display_data(self):
         """
-        Displays the data in dict like format, row by row.
-        By default, it shows 10 rows.
+        Displays the data in dict like format, five rows at a time.
         """
-        print(f'Data: (total_rows={len(self.df)})')
+        print(f'Data: (Total rows: {len(self.df)})')
         generator = self._row_generator()
         prompt = 'Do you wish to view data ? Enter Yes or No: '
         options = ['yes', 'no']
 
         while get_input(prompt=prompt, options=options) == 'yes':
-
             next_five = get_next_n(generator=generator, size=5)
             print('\n'.join([str(x) for x in next_five]))
 
@@ -160,12 +170,12 @@ def get_input(prompt: str, options: list):
     :return: input as: str.strip().lower()
     """
     options = list(map(lambda x: x.lower(), options))
-    input_ = input(prompt).strip().lower()
+    user_input = input(prompt).strip().lower()
 
-    if input_ not in options:
-        print_red(f"Error: given input is not valid ('{input_}'), must be one of these options: {options}")
+    if user_input not in options:
+        print_red(f"Error: given input is not valid ('{user_input}'), must be one of these options: {options}")
         return get_input(prompt, options)
-    return input_
+    return user_input
 
 
 def get_next_n(generator, size: int):

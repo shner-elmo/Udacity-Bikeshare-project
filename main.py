@@ -87,8 +87,8 @@ class BikeShareData:
 
         print(f'Average trip duration by day:')
         day_avg_time = day_group['Trip Duration'].mean().to_dict()
-        x = {key: time.strftime("%H:%M:%S", time.gmtime(val)) for key, val in day_avg_time.items()}
-        pprint(x)
+        day_avg_timestamp = {key: time.strftime("%H:%M:%S", time.gmtime(val)) for key, val in day_avg_time.items()}
+        pprint(day_avg_timestamp)
         print_cyan('- ' * 25)
 
         start = self.df['Start Station'].value_counts()
